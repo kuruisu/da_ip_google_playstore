@@ -1,0 +1,135 @@
+---
+title: "Flex Google Play Store App"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: column
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+# Settingan Agar tidak muncul numeric value
+options(scipen = 9999)
+
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(modelr)
+library(naniar)
+library(janitor)
+library(dplyr)
+library(plyr)
+library(scales)
+library(flexdashboard)
+library(plotly)
+library(glue)
+library(highcharter)
+
+#data
+data <- read_csv("data_input/googleplaystore.csv")
+
+
+#data cleansing and fill na value
+app_data <- unique(data) #dropping duplicate records
+glimpse(app_data)
+
+
+ms_data <- app_data %>%
+    mutate(Rating = replace_na(Rating,min(Rating, na.rm = TRUE)))%>%  #replacing "NA" values of Rating with minimum rating value(to support calculations of colunms)
+    mutate(Reviews = replace_na(Reviews,min(Reviews, na.rm = TRUE)))   #replacing "NA" values of Reviews with minimum review value(to support calculations of colunms)
+
+ms_data <- na.omit(ms_data) #remove rows that still have insignificant na values
+ms_data$`Last Updated`= mdy(ms_data$`Last Updated`)
+ms_data$year = year(ms_data$`Last Updated`)
+
+
+#data cleansing
+data_clean <- ms_data %>%
+  mutate(Installs = str_replace_all(Installs,"([,+])", ""),
+         Size = str_replace_all(Size, "M", "")) %>%
+  mutate(Price = as.double(Price),
+         Size = as.double(Size),
+         Installs = as.integer(Installs),
+         Category = as.factor(Category),
+         `Content Rating` = as.factor(`Content Rating`),
+         Genres = as.factor(Genres)) %>% 
+  mutate(rating_per_installs = Rating / Installs,
+         review_per_installs = Reviews / Installs,
+         size_per_installs = Size / Installs)
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Frequency Categories
+
+```{r}
+
+data_count <- 
+data_clean %>% 
+  group_by(Category) %>% 
+  dplyr::summarise(freq = n()) %>% 
+  arrange(-freq) %>% 
+  mutate(label = glue("Category: {Category}
+                      Freq: {freq}"))
+
+plot1 <- 
+ggplot(data = data_count, mapping = aes(x = freq, 
+                                        y = reorder(Category, freq),
+                                        text = label)) +
+  geom_col(mapping = aes(fill = freq)) +
+  scale_fill_gradient2(low = muted("red"),mid="white", high =muted("green") ) +
+    labs(title = 'Trending Categories on Play Store from 2010 - 2018' ,
+       x = 'Applications Count',
+       y = NULL) +
+  theme_minimal() +
+  theme(legend.position = "none")  
+
+ggplotly(p = plot1, tooltip = "text")
+```
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+
+### Rating vs Review Games App
+
+```{r}
+# Data preparation:
+game <- data_clean[data_clean$Category == "GAME",]
+happeninggame <- aggregate(`Last Updated` ~ App, game, length)
+happeninggame <- happeninggame[order(happeninggame$`Last Updated`, decreasing=T), ]
+happeninggame <- happeninggame[happeninggame$`Last Updated` >= 5, ]
+
+hexp <- ggplot(game[game$App %in% happeninggame$App,], aes(x=rating_per_installs, y=review_per_installs))+
+  geom_point(aes(size=Reviews, col=App), alpha=0.6)+
+  labs(title="Rating vs Review in Happening Games Application", subtitle="Visualizing Rating vs Review, source: Google Play Store")
+
+ggplotly(hexp)
+```
+
+### Mean Reviewer in Family Categories
+
+```{r}
+app_trend <- 
+data_clean %>% 
+  filter(Category %in% "FAMILY") %>% 
+  group_by(year) %>% 
+  dplyr::summarise(mean_reviews = mean(Reviews)) %>% 
+  mutate(label = glue("Year: {year}
+                      Reviews: {scales::comma(mean_reviews, accuracy = 0.01)}"))
+
+
+plot3 <- 
+ggplot(data = app_trend, mapping = aes(x = as.factor(year), 
+                                        y = mean_reviews, 
+                                        text = label))+
+  geom_line(group = 1, color = "blue") +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Reviewer Activity in Family Categories From 2010 - 2018",
+       x = "Year",
+       y = "Mean Reviewer") +
+  theme_minimal()
+
+ggplotly(p = plot3, tooltip = "text")
+```
+

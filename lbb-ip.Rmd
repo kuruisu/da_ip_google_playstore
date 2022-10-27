@@ -1,0 +1,230 @@
+---
+title: "lbb-ip"
+author: "chrisantonius"
+date: "2022-10-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Settingan Agar tidak muncul numeric value
+options(scipen = 9999)
+
+# List Library
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(modelr)
+library(naniar)
+library(janitor)
+library(dplyr)
+library(plyr)
+library(scales)
+library(flexdashboard)
+library(plotly)
+library(glue)
+library(highcharter)
+
+# Data
+data <- read_csv("data_input/googleplaystore.csv")
+data
+```
+```{r}
+sum(duplicated(data))
+```
+```{r}
+head(data)
+```
+
+```{r}
+str(data)
+```
+```{r}
+app_data <- unique(data) #dropping duplicate records
+glimpse(app_data)
+
+#vis_miss(app_data) #assessing missing values of distict records
+
+ms_data <- app_data %>%
+    mutate(Rating = replace_na(Rating,min(Rating, na.rm = TRUE)))%>%  #replacing "NA" values of Rating with minimum rating value(to support calculations of colunms)
+    mutate(Reviews = replace_na(Reviews,min(Reviews, na.rm = TRUE)))   #replacing "NA" values of Reviews with minimum review value(to support calculations of colunms)
+
+#vis_miss(ps_data) #assessing missing values of distict records
+```
+
+```{r}
+which(is.na(ms_data))
+```
+
+
+```{r}
+ms_data <- na.omit(ms_data) #remove rows that still have insignificant na values 
+```
+```{r}
+ms_data$`Last Updated`= mdy(ms_data$`Last Updated`)
+ms_data$year = year(ms_data$`Last Updated`)
+ms_data
+```
+
+```{r}
+unique(ms_data$Installs)
+```
+
+
+```{r}
+data_clean <- ms_data %>%
+  mutate(Installs = str_replace_all(Installs,"([,+])", ""),
+         Size = str_replace_all(Size, "M", "")) %>%
+  mutate(Price = as.double(Price),
+         Size = as.double(Size),
+         Installs = as.integer(Installs),
+         Category = as.factor(Category),
+         `Content Rating` = as.factor(`Content Rating`),
+         Genres = as.factor(Genres)) %>% 
+  mutate(rating_per_installs = Rating / Installs,
+         review_per_installs = Reviews / Installs,
+         size_per_installs = Size / Installs)
+```
+
+
+```{r}
+data_clean
+```
+
+
+```{r}
+data_count <- 
+data_clean %>% 
+  group_by(Category) %>% 
+  dplyr::summarise(freq = n()) %>% 
+  arrange(-freq) %>% 
+  mutate(label = glue("Category: {Category}
+                      Freq: {freq}"))
+```
+
+
+```{r}
+plot1 <- 
+ggplot(data = data_count, mapping = aes(x = freq, 
+                                        y = reorder(Category, freq),
+                                        text = label)) +
+  geom_col(mapping = aes(fill = freq)) +
+  scale_fill_gradient2(low = muted("red"),mid="white", high =muted("green") ) +
+    labs(title = 'Trending Categories on Play Store from 2012 - 2018' ,
+       x = 'Applications Count',
+       y = NULL) +
+  theme_minimal() +
+  theme(legend.position = "none") 
+```
+
+```{r}
+# Please type your code here
+ggplotly(p = plot1, tooltip = "text")
+```
+
+```{r}
+data_top_apps <- 
+data_clean %>% 
+  filter(Category %in% "FAMILY") %>% 
+  group_by(Genres) %>% 
+  dplyr::summarise(mean_reviews = mean(Reviews)) %>% 
+  arrange(-mean_reviews) %>% 
+  head(10) %>% 
+  mutate(label = glue("Application: {Genres}
+                      Mean Reviews: {scales::comma(mean_reviews)}"))
+```
+
+
+
+```{r}
+# Please type your code here
+plot2 <- 
+ggplot(data = data_top_apps, mapping = aes(x = mean_reviews, 
+                                              y = Genres,
+                                              color = mean_reviews,
+                                              text = label)) +
+  geom_segment(mapping = aes(x = 0, xend = mean_reviews, 
+                             y = reorder(Genres, mean_reviews), yend = Genres)) +
+  geom_point() +
+  scale_color_gradient(low = "red", high = "black") +
+  # scale_x_continuous(labels = label_number(big.mark = ".")) +
+  labs(x = 'Mean Reviews',
+       y = NULL,
+       title = 'Top 10 Application in Family') +
+  theme_minimal() +
+  theme(legend.position = "none") 
+```
+
+```{r}
+# Please type your code here
+ggplotly(p = plot2, tooltip = "text")
+```
+
+
+```{r}
+# Please type your code here
+app_trend <- 
+data_clean %>% 
+  filter(Category %in% "FAMILY") %>% 
+  group_by(year) %>% 
+  dplyr::summarise(mean_reviews = mean(Reviews)) %>% 
+  mutate(label = glue("Year: {year}
+                      Reviews: {scales::comma(mean_reviews, accuracy = 0.01)}"))
+
+app_trend %>% 
+  head(1)
+```
+
+```{r}
+# Please type your code here
+plot3 <- 
+ggplot(data = app_trend, mapping = aes(x = as.factor(year), 
+                                        y = mean_reviews, 
+                                        text = label))+
+  geom_line(group = 1, color = "blue") +
+  geom_point() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Reviewer Activity in Family Categories",
+       x = "Year Month Update",
+       y = "Reviewer") +
+  theme_minimal()
+```
+
+```{r}
+ggplotly(p = plot3, tooltip = "text")
+```
+
+
+
+```{r}
+# Data preparation:
+game <- data_clean[data_clean$Category == "GAME",]
+happeninggame <- aggregate(`Last Updated` ~ App, game, length)
+happeninggame <- happeninggame[order(happeninggame$`Last Updated`, decreasing=T), ]
+happeninggame <- happeninggame[happeninggame$`Last Updated` >= 5, ]
+```
+
+```{r}
+hexp <- ggplot(game[game$App %in% happeninggame$App,], aes(x=rating_per_installs, y=review_per_installs))+
+  geom_point(aes(size=Reviews, col=App), alpha=0.6)+
+  labs(title="Rating vs Review  in Happening Games Application", subtitle="Visualizing Rating vs Review, source: Google Play Store")
+
+```
+
+```{r}
+ggplotly(hexp)
+```
+
+
+```{r}
+hchart(data_clean, "scatter", hcaes(x= rating_per_installs,y=review_per_installs , name = Genres, group = Category)) %>% 
+    hc_chart(type = "scatter") %>%
+    hc_tooltip(
+      headerFormat = "",
+      pointFormat = "<b>{point.Genres}</b> is in <b>{point.Category}</b>"
+    )
+```
+
